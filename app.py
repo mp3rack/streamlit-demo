@@ -1,68 +1,60 @@
 import streamlit as st
+
 import mysql.connector
 import pandas as pd
+
 import folium
 from streamlit_folium import st_folium
-from datetime import datetime
+
 import plotly.express as px
 
+from datetime import datetime
 
+st.set_page_config(layout="wide")
 
-
-# 👤 Zugangsdaten festlegen
-USERNAME = "admin"
-PASSWORD = "RESUFED"
-
-# Session-Authentifizierung
-if "auth" not in st.session_state:
-    st.session_state.auth = False
-
+# Perform Login
 def login():
-    st.title("🔐 Login erforderlich")
-    username = st.text_input("Benutzername")
-    password = st.text_input("Passwort", type="password")
+    st.title("🔐 Please login")
+    username = st.text_input("User")
+    password = st.text_input("Pass", type="password")
+    
     if st.button("Login"):
-        if username == USERNAME and password == PASSWORD:
+        if username == "admin" and password == "RESUFED":
             st.session_state.auth = True
+            st.rerun()
         else:
-            st.error("Zugangsdaten falsch!")
+            st.error("Invalid credentials!")
 
-# App-Inhalt nur anzeigen, wenn eingeloggt
-if not st.session_state.auth:
-    login()
-else:
+def run():
+    st.title("📅 Track and Speed")
 
-    st.set_page_config(layout="wide")
-    st.title("📅 Track-Visualisierung mit Geschwindigkeit")
+    selected_start_date = st.date_input("Select start", value=datetime.today().date())
+    selected_end_date = st.date_input("Select ebd", value=datetime.today().date())
+    
+    start_of_day = datetime.combine(selected_start_date, datetime.min.time())
+    end_of_day = datetime.combine(selected_end_date, datetime.max.time())
 
-    # 🕛 Datumsauswahl
-    selected_date = st.date_input("Wähle ein Datum", value=datetime.today().date())
-    start_of_day = datetime.combine(selected_date, datetime.min.time())
-    end_of_day = datetime.combine(selected_date, datetime.max.time())
-
-    # 💡 Datenbankverbindung
-    conn = mysql.connector.connect(
+    with mysql.connector.connect(
         host="192.168.56.101",
         user="DEFUSER",
         password="RESUFED",
         database="GPS2"
-    )
-    cursor = conn.cursor()
+    ) as conn:
+        with conn.cursor() as cursor:
 
-    # SQL-Abfrage mit Zeitfilter
-    query = """
-        SELECT latitude, longitude, time, speed
-        FROM LOCATIONS
-        WHERE time BETWEEN %s AND %s
-        ORDER BY time ASC
-    """
-    cursor.execute(query, (start_of_day, end_of_day))
-    results = cursor.fetchall()
-    cursor.close()
-    conn.close()
+            query = """
+                SELECT latitude, longitude, time, speed
+                FROM LOCATIONS
+                WHERE time BETWEEN %s AND %s
+                ORDER BY time ASC
+            """
+
+            cursor.execute(query, (start_of_day, end_of_day))
+            results = cursor.fetchall()
+        conn.close()
 
     if not results:
-        st.warning("Kein Track für das ausgewählte Datum gefunden.")
+        st.warning("No track for selected date.")
         st.stop()
 
     # 📊 Daten vorbereiten
@@ -75,12 +67,6 @@ else:
     selected_time = pd.to_datetime(selected_time_str)
     selected_row = df[df["time"] == selected_time].iloc[0]
     selected_coord = (selected_row["latitude"], selected_row["longitude"])
-
-    # 📈 Geschwindigkeit mit Plotly visualisieren
-    fig = px.line(df, x="time", y="speed_kmh", title="Geschwindigkeit über Zeit (km/h)", labels={"time": "Zeit", "speed_kmh": "Geschwindigkeit (km/h)"})
-    fig.update_traces(line=dict(color="orange"))
-    fig.add_scatter(x=[selected_time], y=[selected_row["speed_kmh"]], mode="markers", marker=dict(color="red", size=10), name="Ausgewählt")
-    st.plotly_chart(fig, use_container_width=True)
 
     # 🌍 Karte mit Track & Marker erzeugen
     center_lat, center_lon = df.iloc[0]["latitude"], df.iloc[0]["longitude"]
@@ -99,5 +85,20 @@ else:
         icon=folium.Icon(color="red", icon="info-sign")
     ).add_to(m)
 
-    st.subheader(f"🗺️ Karte vom {selected_date.strftime('%d.%m.%Y')}")
-    st_folium(m, width=900, height=600)
+    st_folium(m, use_container_width=True, height=400)
+
+    # 📈 Geschwindigkeit mit Plotly visualisieren
+    fig = px.line(df, x="time", y="speed_kmh", title="Geschwindigkeit über Zeit (km/h)", labels={"time": "Zeit", "speed_kmh": "Geschwindigkeit (km/h)"})
+    fig.update_traces(line=dict(color="orange"))
+    fig.add_scatter(x=[selected_time], y=[selected_row["speed_kmh"]], mode="markers", marker=dict(color="red", size=10), name="Ausgewählt")
+    st.plotly_chart(fig, use_container_width=True)
+
+# ---------------------------------------------------------------------------------------
+if "auth" not in st.session_state:
+    st.session_state.auth = False
+
+# App-Inhalt nur anzeigen, wenn eingeloggt
+if not st.session_state.auth:
+    login()
+else:
+    run()
